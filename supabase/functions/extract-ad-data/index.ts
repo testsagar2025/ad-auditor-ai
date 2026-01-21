@@ -29,22 +29,26 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are an expert at extracting information from Indian coaching institute newspaper advertisements. Extract the following data and return ONLY valid JSON:
+            content: `You are an expert at extracting information from Indian coaching institute newspaper advertisements. These ads often feature MULTIPLE students. Extract ALL students shown in the ad and return ONLY valid JSON in this format:
 {
-  "topper_name": "Full name of the student/topper",
-  "rank_claimed": "The rank claimed (e.g., AIR 5, Rank 1)",
-  "exam_name": "Name of the exam (e.g., IIT-JEE, NEET, UPSC)",
-  "exam_year": 2024,
   "institute_name": "Name of the coaching institute",
-  "fine_print": "Any disclaimers or small print like 'Mock Interview', 'Crash Course', etc.",
+  "students": [
+    {
+      "topper_name": "Full name of the student",
+      "rank_claimed": "The rank claimed (e.g., AIR 5, Rank 1, 100%ile)",
+      "exam_name": "Name of the exam (e.g., IIT-JEE, NEET, UPSC)",
+      "exam_year": 2024,
+      "fine_print": "Any disclaimers like 'Mock Interview', 'Crash Course', 'Distance Learning', etc."
+    }
+  ],
   "confidence": 0.9
 }
-If you cannot extract a field, use null. Be especially careful to find any fine print or disclaimers.`
+Extract EVERY student visible in the advertisement. If you cannot determine a field, use null. Be especially careful to find any fine print or disclaimers that apply to each student.`
           },
           {
             role: "user",
             content: [
-              { type: "text", text: "Extract the topper claim data from this coaching advertisement:" },
+              { type: "text", text: "Extract ALL topper claims from this coaching advertisement. There may be multiple students shown:" },
               { type: "image_url", image_url: { url: image } }
             ]
           }
