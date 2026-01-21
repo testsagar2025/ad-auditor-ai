@@ -8,13 +8,19 @@ import {
   Eye,
   Scale,
   TrendingUp,
+  Award,
+  ArrowRight,
+  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout/Layout";
 import { StatCard } from "@/components/ui/stat-card";
+import { DeceptionScore } from "@/components/ui/deception-score";
+import { Badge } from "@/components/ui/badge";
 import { useInstitutes } from "@/hooks/useInstitutes";
 import { useConflicts } from "@/hooks/useConflicts";
 import { useClaims } from "@/hooks/useClaims";
+import { cn } from "@/lib/utils";
 
 export default function Index() {
   const { data: institutes } = useInstitutes();
@@ -25,6 +31,15 @@ export default function Index() {
   const totalConflicts = conflicts?.length || 0;
   const totalClaims = claims?.length || 0;
   const highRiskCount = institutes?.filter((i) => i.deception_score > 50).length || 0;
+
+  // Get top offenders (highest deception scores)
+  const topOffenders = institutes?.slice().sort((a, b) => b.deception_score - a.deception_score).slice(0, 5) || [];
+
+  // Get recent claims
+  const recentClaims = claims?.slice(0, 6) || [];
+
+  // Get active conflicts
+  const activeConflicts = conflicts?.filter((c) => c.status !== "dismissed").slice(0, 3) || [];
 
   return (
     <Layout>
@@ -98,6 +113,172 @@ export default function Index() {
           </div>
         </div>
       </section>
+
+      {/* Top Offenders Section */}
+      {topOffenders.length > 0 && (
+        <section className="py-16 bg-card/50 border-y border-border">
+          <div className="container">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-bold mb-2">Top Offenders</h2>
+                <p className="text-muted-foreground">Institutes with highest deception scores</p>
+              </div>
+              <Button variant="outline" asChild>
+                <Link to="/store">
+                  View All
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Link>
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {topOffenders.map((institute, index) => (
+                <Link
+                  key={institute.id}
+                  to={`/store/${institute.id}`}
+                  className={cn(
+                    "audit-card group cursor-pointer flex items-center gap-4",
+                    index === 0 && "lg:col-span-1 border-destructive/50"
+                  )}
+                >
+                  <div className="text-2xl font-bold text-muted-foreground w-8">
+                    #{index + 1}
+                  </div>
+                  <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {institute.logo_url ? (
+                      <img
+                        src={institute.logo_url}
+                        alt={institute.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <Building2 className="h-6 w-6 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold truncate group-hover:text-primary transition-colors">
+                      {institute.name}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {institute.conflicted_claims} conflicts
+                    </p>
+                  </div>
+                  <DeceptionScore score={institute.deception_score} size="sm" showLabel={false} />
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Recent Claims Section */}
+      {recentClaims.length > 0 && (
+        <section className="py-16 border-b border-border">
+          <div className="container">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-bold mb-2">Recent Submissions</h2>
+                <p className="text-muted-foreground">Latest topper claims under analysis</p>
+              </div>
+              <Button variant="outline" asChild>
+                <Link to="/scanner">
+                  Submit Your Own
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Link>
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentClaims.map((claim) => (
+                <div
+                  key={claim.id}
+                  className={cn(
+                    "audit-card",
+                    claim.has_conflict && "border-destructive/30"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Award className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="font-semibold truncate">{claim.topper_name}</h4>
+                          <p className="text-sm text-primary">{claim.rank_claimed}</p>
+                        </div>
+                        {claim.has_conflict && (
+                          <Badge variant="destructive" className="text-xs flex-shrink-0">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Conflict
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {claim.exam_name} {claim.exam_year}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Active Conflicts */}
+      {activeConflicts.length > 0 && (
+        <section className="py-16">
+          <div className="container">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-bold mb-2">Active Conflicts</h2>
+                <p className="text-muted-foreground">Cases where multiple institutes claim the same topper</p>
+              </div>
+              <Button variant="outline" asChild>
+                <Link to="/conflicts">
+                  View All Conflicts
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Link>
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {activeConflicts.map((conflict) => (
+                <div
+                  key={conflict.id}
+                  className={cn(
+                    "audit-card",
+                    conflict.severity === "critical" && "border-destructive/50 glow-destructive"
+                  )}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="h-6 w-6 text-destructive" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold">{conflict.topper_name} - {conflict.rank_claimed}</h4>
+                      <p className="text-sm text-muted-foreground">
+                        {conflict.exam_name} {conflict.exam_year} • {conflict.institute_ids?.length || 0} institutes claiming
+                      </p>
+                    </div>
+                    <Badge
+                      className={cn(
+                        conflict.severity === "critical" && "bg-destructive",
+                        conflict.severity === "high" && "bg-destructive/80",
+                        conflict.severity === "medium" && "bg-warning",
+                        conflict.severity === "low" && "bg-muted"
+                      )}
+                    >
+                      {conflict.severity}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* How It Works */}
       <section className="py-16 bg-card border-y border-border">
