@@ -69,12 +69,16 @@ export interface ConflictDetail {
   newspaper_images: string[];
 }
 
-export interface ExtractedAdData {
+export interface ExtractedStudent {
   topper_name: string;
   rank_claimed: string;
-  exam_name: string;
-  exam_year: number;
-  institute_name: string;
+  exam_name: string | null;
+  exam_year: number | null;
   fine_print: string | null;
+}
+
+export interface ExtractedAdData {
+  institute_name: string;
+  students: ExtractedStudent[];
   confidence: number;
 }

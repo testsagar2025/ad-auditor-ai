@@ -1,6 +1,16 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, Image, Loader2, AlertCircle, CheckCircle, FileText } from "lucide-react";
+import { 
+  Upload, 
+  Image, 
+  Loader2, 
+  AlertCircle, 
+  CheckCircle, 
+  FileText,
+  Plus,
+  Trash2,
+  Users
+} from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,9 +19,27 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import type { ExtractedAdData } from "@/types/database";
+import type { ExtractedAdData, ExtractedStudent } from "@/types/database";
 
 type ScanStep = "upload" | "processing" | "review" | "submitted";
+
+interface StudentFormData {
+  id: string;
+  topper_name: string;
+  rank_claimed: string;
+  exam_name: string;
+  exam_year: number;
+  fine_print: string;
+}
+
+const createEmptyStudent = (): StudentFormData => ({
+  id: crypto.randomUUID(),
+  topper_name: "",
+  rank_claimed: "",
+  exam_name: "",
+  exam_year: new Date().getFullYear(),
+  fine_print: "",
+});
 
 export default function Scanner() {
   const navigate = useNavigate();
@@ -21,15 +49,11 @@ export default function Scanner() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedAdData | null>(null);
-  const [manualData, setManualData] = useState({
-    topper_name: "",
-    rank_claimed: "",
-    exam_name: "",
-    exam_year: new Date().getFullYear(),
-    institute_name: "",
-    fine_print: "",
-    newspaper_name: "",
-  });
+  
+  // Form data
+  const [instituteName, setInstituteName] = useState("");
+  const [newspaperName, setNewspaperName] = useState("");
+  const [students, setStudents] = useState<StudentFormData[]>([createEmptyStudent()]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,7 +92,6 @@ export default function Scanner() {
     setStep("processing");
 
     try {
-      // Call the AI edge function to extract data
       const { data, error } = await supabase.functions.invoke("extract-ad-data", {
         body: { image: imagePreview },
       });
@@ -76,16 +99,20 @@ export default function Scanner() {
       if (error) throw error;
 
       if (data?.extracted) {
-        setExtractedData(data.extracted);
-        setManualData({
-          topper_name: data.extracted.topper_name || "",
-          rank_claimed: data.extracted.rank_claimed || "",
-          exam_name: data.extracted.exam_name || "",
-          exam_year: data.extracted.exam_year || new Date().getFullYear(),
-          institute_name: data.extracted.institute_name || "",
-          fine_print: data.extracted.fine_print || "",
-          newspaper_name: "",
-        });
+        const extracted = data.extracted as ExtractedAdData;
+        setExtractedData(extracted);
+        setInstituteName(extracted.institute_name || "");
+        
+        if (extracted.students && extracted.students.length > 0) {
+          setStudents(extracted.students.map((s: ExtractedStudent) => ({
+            id: crypto.randomUUID(),
+            topper_name: s.topper_name || "",
+            rank_claimed: s.rank_claimed || "",
+            exam_name: s.exam_name || "",
+            exam_year: s.exam_year || new Date().getFullYear(),
+            fine_print: s.fine_print || "",
+          })));
+        }
       }
 
       setStep("review");
@@ -102,15 +129,51 @@ export default function Scanner() {
     }
   };
 
+  const addStudent = () => {
+    setStudents([...students, createEmptyStudent()]);
+  };
+
+  const removeStudent = (id: string) => {
+    if (students.length > 1) {
+      setStudents(students.filter(s => s.id !== id));
+    }
+  };
+
+  const updateStudent = (id: string, field: keyof StudentFormData, value: string | number) => {
+    setStudents(students.map(s => 
+      s.id === id ? { ...s, [field]: value } : s
+    ));
+  };
+
   const handleSubmit = async () => {
     if (!imageFile) return;
+
+    // Validate at least one complete student
+    const validStudents = students.filter(s => s.topper_name && s.rank_claimed);
+    if (validStudents.length === 0) {
+      toast({
+        title: "Missing information",
+        description: "Please add at least one student with name and rank",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!instituteName) {
+      toast({
+        title: "Missing information",
+        description: "Please enter the institute name",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsProcessing(true);
 
     try {
       // Upload image to storage
       const fileName = `${Date.now()}-${imageFile.name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from("newspaper-ads")
         .upload(fileName, imageFile);
 
@@ -123,55 +186,60 @@ export default function Scanner() {
       // Check if institute exists or create new
       let instituteId: string | null = null;
 
-      if (manualData.institute_name) {
-        const { data: existing } = await supabase
+      const { data: existing } = await supabase
+        .from("coaching_institutes")
+        .select("id, total_claims")
+        .ilike("name", instituteName)
+        .maybeSingle();
+
+      if (existing) {
+        instituteId = existing.id;
+        // Update total claims count
+        await supabase
           .from("coaching_institutes")
-          .select("id")
-          .ilike("name", manualData.institute_name)
-          .maybeSingle();
+          .update({ total_claims: (existing.total_claims || 0) + validStudents.length })
+          .eq("id", existing.id);
+      } else {
+        const { data: newInstitute, error: instituteError } = await supabase
+          .from("coaching_institutes")
+          .insert({ name: instituteName, total_claims: validStudents.length })
+          .select()
+          .single();
 
-        if (existing) {
-          instituteId = existing.id;
-        } else {
-          const { data: newInstitute, error: instituteError } = await supabase
-            .from("coaching_institutes")
-            .insert({ name: manualData.institute_name })
-            .select()
-            .single();
-
-          if (instituteError) throw instituteError;
-          instituteId = newInstitute.id;
-        }
+        if (instituteError) throw instituteError;
+        instituteId = newInstitute.id;
       }
 
-      // Create the claim
-      const { error: claimError } = await supabase.from("topper_claims").insert({
-        institute_id: instituteId,
-        topper_name: manualData.topper_name,
-        rank_claimed: manualData.rank_claimed,
-        exam_name: manualData.exam_name || null,
-        exam_year: manualData.exam_year || null,
-        fine_print: manualData.fine_print || null,
-        newspaper_name: manualData.newspaper_name || null,
-        newspaper_image_url: urlData.publicUrl,
-        extracted_text: extractedData ? JSON.stringify(extractedData) : null,
-      });
+      // Create claims for each student
+      for (const student of validStudents) {
+        const { error: claimError } = await supabase.from("topper_claims").insert({
+          institute_id: instituteId,
+          topper_name: student.topper_name,
+          rank_claimed: student.rank_claimed,
+          exam_name: student.exam_name || null,
+          exam_year: student.exam_year || null,
+          fine_print: student.fine_print || null,
+          newspaper_name: newspaperName || null,
+          newspaper_image_url: urlData.publicUrl,
+          extracted_text: extractedData ? JSON.stringify(extractedData) : null,
+        });
 
-      if (claimError) throw claimError;
+        if (claimError) throw claimError;
 
-      // Trigger conflict detection
-      await supabase.functions.invoke("detect-conflicts", {
-        body: {
-          topper_name: manualData.topper_name,
-          rank_claimed: manualData.rank_claimed,
-          exam_year: manualData.exam_year,
-        },
-      });
+        // Trigger conflict detection for each student
+        await supabase.functions.invoke("detect-conflicts", {
+          body: {
+            topper_name: student.topper_name,
+            rank_claimed: student.rank_claimed,
+            exam_year: student.exam_year,
+          },
+        });
+      }
 
       setStep("submitted");
       toast({
         title: "Success!",
-        description: "Your submission has been recorded anonymously.",
+        description: `${validStudents.length} student claim(s) recorded anonymously.`,
       });
     } catch (error) {
       console.error("Submission error:", error);
@@ -185,13 +253,23 @@ export default function Scanner() {
     }
   };
 
+  const resetForm = () => {
+    setStep("upload");
+    setImageFile(null);
+    setImagePreview(null);
+    setExtractedData(null);
+    setInstituteName("");
+    setNewspaperName("");
+    setStudents([createEmptyStudent()]);
+  };
+
   return (
     <Layout>
-      <div className="container py-8 max-w-3xl">
+      <div className="container py-8 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Newspaper Ad Scanner</h1>
           <p className="text-muted-foreground">
-            Upload a coaching advertisement photo. AI will extract topper claims for verification.
+            Upload a coaching advertisement photo. AI will extract all topper claims for verification.
           </p>
         </div>
 
@@ -290,153 +368,185 @@ export default function Scanner() {
               <Loader2 className="h-12 w-12 mx-auto animate-spin text-primary mb-4" />
               <h3 className="text-lg font-semibold mb-2">Processing Image</h3>
               <p className="text-muted-foreground">
-                AI is extracting topper names, ranks, and fine print...
+                AI is extracting all topper names, ranks, and fine print...
               </p>
             </CardContent>
           </Card>
         )}
 
         {step === "review" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Review & Confirm</CardTitle>
-              <CardDescription>
-                Verify the extracted information and correct if needed
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {imagePreview && (
-                <div className="mb-6">
+          <div className="space-y-6">
+            {/* Image Preview */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Uploaded Advertisement</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {imagePreview && (
                   <img
                     src={imagePreview}
                     alt="Uploaded ad"
-                    className="max-h-48 rounded-lg mx-auto"
+                    className="max-h-64 rounded-lg mx-auto"
                   />
-                </div>
-              )}
+                )}
+              </CardContent>
+            </Card>
 
-              {extractedData && extractedData.confidence < 0.7 && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 text-warning text-sm">
-                  <AlertCircle className="h-4 w-4" />
-                  Low confidence extraction. Please verify all fields.
-                </div>
-              )}
+            {/* Institute & Newspaper Info */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Advertisement Details</CardTitle>
+                <CardDescription>
+                  Information about the coaching institute and source
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {extractedData && extractedData.confidence < 0.7 && (
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 text-warning text-sm">
+                    <AlertCircle className="h-4 w-4" />
+                    Low confidence extraction. Please verify all fields.
+                  </div>
+                )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="institute">Institute Name *</Label>
-                  <Input
-                    id="institute"
-                    value={manualData.institute_name}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, institute_name: e.target.value })
-                    }
-                    placeholder="e.g., ABC Coaching"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="institute">Institute Name *</Label>
+                    <Input
+                      id="institute"
+                      value={instituteName}
+                      onChange={(e) => setInstituteName(e.target.value)}
+                      placeholder="e.g., ABC Coaching"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="newspaper">Newspaper Name</Label>
+                    <Input
+                      id="newspaper"
+                      value={newspaperName}
+                      onChange={(e) => setNewspaperName(e.target.value)}
+                      placeholder="e.g., Times of India"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="topper">Topper Name *</Label>
-                  <Input
-                    id="topper"
-                    value={manualData.topper_name}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, topper_name: e.target.value })
-                    }
-                    placeholder="e.g., John Doe"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="rank">Rank Claimed *</Label>
-                  <Input
-                    id="rank"
-                    value={manualData.rank_claimed}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, rank_claimed: e.target.value })
-                    }
-                    placeholder="e.g., AIR 5"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="exam">Exam Name</Label>
-                  <Input
-                    id="exam"
-                    value={manualData.exam_name}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, exam_name: e.target.value })
-                    }
-                    placeholder="e.g., IIT-JEE Advanced"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="year">Exam Year</Label>
-                  <Input
-                    id="year"
-                    type="number"
-                    value={manualData.exam_year}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, exam_year: parseInt(e.target.value) })
-                    }
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="newspaper">Newspaper Name</Label>
-                  <Input
-                    id="newspaper"
-                    value={manualData.newspaper_name}
-                    onChange={(e) =>
-                      setManualData({ ...manualData, newspaper_name: e.target.value })
-                    }
-                    placeholder="e.g., Times of India"
-                  />
-                </div>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div>
-                <Label htmlFor="fineprint">Fine Print / Disclaimers</Label>
-                <Textarea
-                  id="fineprint"
-                  value={manualData.fine_print}
-                  onChange={(e) =>
-                    setManualData({ ...manualData, fine_print: e.target.value })
-                  }
-                  placeholder="Any small text or disclaimers found in the ad..."
-                  rows={3}
-                />
-              </div>
+            {/* Students */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Students ({students.length})
+                    </CardTitle>
+                    <CardDescription>
+                      All toppers mentioned in the advertisement
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={addStudent}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Student
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {students.map((student, index) => (
+                  <div
+                    key={student.id}
+                    className="p-4 rounded-lg border border-border bg-card/50 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium">Student #{index + 1}</h4>
+                      {students.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeStudent(student.id)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
 
-              <div className="flex gap-3 pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => setStep("upload")}
-                  className="flex-1"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={handleSubmit}
-                  disabled={
-                    isProcessing ||
-                    !manualData.topper_name ||
-                    !manualData.rank_claimed ||
-                    !manualData.institute_name
-                  }
-                  className="flex-1"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    <>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Submit Claim
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label>Topper Name *</Label>
+                        <Input
+                          value={student.topper_name}
+                          onChange={(e) => updateStudent(student.id, "topper_name", e.target.value)}
+                          placeholder="e.g., Rahul Sharma"
+                        />
+                      </div>
+                      <div>
+                        <Label>Rank Claimed *</Label>
+                        <Input
+                          value={student.rank_claimed}
+                          onChange={(e) => updateStudent(student.id, "rank_claimed", e.target.value)}
+                          placeholder="e.g., AIR 5, 100%ile"
+                        />
+                      </div>
+                      <div>
+                        <Label>Exam Name</Label>
+                        <Input
+                          value={student.exam_name}
+                          onChange={(e) => updateStudent(student.id, "exam_name", e.target.value)}
+                          placeholder="e.g., JEE Advanced"
+                        />
+                      </div>
+                      <div>
+                        <Label>Exam Year</Label>
+                        <Input
+                          type="number"
+                          value={student.exam_year}
+                          onChange={(e) => updateStudent(student.id, "exam_year", parseInt(e.target.value))}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label>Fine Print / Disclaimers</Label>
+                      <Textarea
+                        value={student.fine_print}
+                        onChange={(e) => updateStudent(student.id, "fine_print", e.target.value)}
+                        placeholder="e.g., Mock Interview, Distance Learning, Crash Course..."
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setStep("upload")}
+                className="flex-1"
+              >
+                Back
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={isProcessing}
+                className="flex-1"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Submit {students.filter(s => s.topper_name && s.rank_claimed).length} Claim(s)
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         )}
 
         {step === "submitted" && (
@@ -454,12 +564,7 @@ export default function Scanner() {
                 <Button variant="outline" onClick={() => navigate("/store")}>
                   View The Store
                 </Button>
-                <Button onClick={() => {
-                  setStep("upload");
-                  setImageFile(null);
-                  setImagePreview(null);
-                  setExtractedData(null);
-                }}>
+                <Button onClick={resetForm}>
                   Upload Another
                 </Button>
               </div>
