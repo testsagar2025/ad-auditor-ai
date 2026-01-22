@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -14,9 +14,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useInstitute, useInstituteClaims } from "@/hooks/useInstitute";
+import { useConflict } from "@/hooks/useConflicts";
 import { supabase } from "@/integrations/supabase/client";
 import { maskPersonName } from "@/lib/privacy";
 import { openPrintWindow } from "@/lib/print";
+import { useQuery } from "@tanstack/react-query";
+import type { CoachingInstitute, TopperClaim } from "@/types/database";
 
 export default function ReportGenerator() {
   const { type, id } = useParams();
@@ -27,43 +30,102 @@ export default function ReportGenerator() {
   const [reportData, setReportData] = useState<any>(null);
 
   const isInstituteReport = type === "institute";
+  const isConflictReport = type === "conflict";
+
   const { data: institute, isLoading: instituteLoading } = useInstitute(
     isInstituteReport ? id : undefined
   );
   const { data: claims } = useInstituteClaims(isInstituteReport ? id : undefined);
 
+  const { data: conflict, isLoading: conflictLoading } = useConflict(
+    isConflictReport ? id || "" : ""
+  );
+
+  const { data: conflictClaims, isLoading: conflictClaimsLoading } = useQuery({
+    queryKey: ["report-conflict-claims", conflict?.id],
+    enabled: !!conflict?.claim_ids?.length,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("topper_claims")
+        .select("*")
+        .in("id", conflict!.claim_ids);
+      if (error) throw error;
+      return (data ?? []) as TopperClaim[];
+    },
+  });
+
+  const { data: conflictInstitutes, isLoading: conflictInstitutesLoading } = useQuery({
+    queryKey: ["report-conflict-institutes", conflict?.id],
+    enabled: !!conflict?.institute_ids?.length,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("coaching_institutes")
+        .select("*")
+        .in("id", conflict!.institute_ids);
+      if (error) throw error;
+      return (data ?? []) as CoachingInstitute[];
+    },
+  });
+
+  const conflictInstituteNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const inst of conflictInstitutes ?? []) map.set(inst.id, inst.name);
+    return map;
+  }, [conflictInstitutes]);
+
   const conflictedClaims = claims?.filter((c) => c.has_conflict) || [];
+  const activeClaims = isInstituteReport ? conflictedClaims : conflictClaims || [];
 
   const generateReport = async () => {
-    if (!institute) return;
+    if (isInstituteReport && !institute) return;
+    if (isConflictReport && !conflict) return;
 
     setIsGenerating(true);
 
     try {
-      // Create report data
-      const nextReportData = {
-        institute_name: institute.name,
-        institute_logo: institute.logo_url,
-        generated_at: new Date().toISOString(),
-        summary: `This report documents ${conflictedClaims.length} potential misleading claims by ${institute.name}. The institute has a deception score of ${institute.deception_score}/100.`,
-        conflict_details: conflictedClaims.map((claim) => ({
-          topper_name: claim.topper_name,
-          rank_claimed: claim.rank_claimed,
-          exam_name: claim.exam_name || "Unknown",
-          exam_year: claim.exam_year || new Date().getFullYear(),
-          fine_print: claim.fine_print,
-          newspaper_images: [claim.newspaper_image_url],
-        })),
-        total_claims: institute.total_claims,
-        conflicted_claims: institute.conflicted_claims,
-        deception_score: institute.deception_score,
-      };
+      const generatedAt = new Date().toISOString();
 
-      // Save to database
-      const { error } = await supabase.from("ccpa_reports").insert({
-        institute_id: institute.id,
-        report_data: nextReportData,
-      });
+      const nextReportData = isInstituteReport
+        ? {
+            institute_name: institute!.name,
+            institute_logo: institute!.logo_url,
+            generated_at: generatedAt,
+            summary: `This report documents ${conflictedClaims.length} potential misleading claims by ${institute!.name}. The institute has a deception score of ${institute!.deception_score}/100.`,
+            conflict_details: conflictedClaims.map((claim) => ({
+              topper_name: claim.topper_name,
+              rank_claimed: claim.rank_claimed,
+              exam_name: claim.exam_name || "Unknown",
+              exam_year: claim.exam_year || new Date().getFullYear(),
+              fine_print: claim.fine_print,
+              newspaper_images: [claim.newspaper_image_url],
+            })),
+            total_claims: institute!.total_claims,
+            conflicted_claims: institute!.conflicted_claims,
+            deception_score: institute!.deception_score,
+          }
+        : {
+            institute_name: "Multiple institutes",
+            institute_logo: null,
+            generated_at: generatedAt,
+            summary: `This report documents a conflict where multiple coaching institutes claim the same topper.`,
+            conflict_details: (conflictClaims ?? []).map((claim) => ({
+              topper_name: claim.topper_name,
+              rank_claimed: claim.rank_claimed,
+              exam_name: claim.exam_name || "Unknown",
+              exam_year: claim.exam_year || new Date().getFullYear(),
+              fine_print: claim.fine_print,
+              conflicting_institutes: claim.institute_id
+                ? [conflictInstituteNameMap.get(claim.institute_id) || "Unknown institute"]
+                : ["Unknown institute"],
+              newspaper_images: [claim.newspaper_image_url],
+            })),
+          };
+
+      const { error } = await supabase.from("ccpa_reports").insert(
+        isInstituteReport
+          ? { institute_id: institute!.id, report_data: nextReportData }
+          : { conflict_id: conflict!.id, report_data: nextReportData }
+      );
 
       if (error) throw error;
 
@@ -86,7 +148,56 @@ export default function ReportGenerator() {
   };
 
   const exportPdf = () => {
-    if (!institute) return;
+    if (isInstituteReport && !institute) return;
+    if (isConflictReport && !conflict) return;
+
+    if (isConflictReport) {
+      const items = (conflictClaims ?? [])
+        .map((c) => {
+          const instName = c.institute_id
+            ? conflictInstituteNameMap.get(c.institute_id) || "Unknown institute"
+            : "Unknown institute";
+          const title = `${escapeHtml(maskPersonName(c.topper_name))} — ${escapeHtml(c.rank_claimed)}`;
+          const meta = `${escapeHtml(instName)}${c.exam_name ? ` • ${escapeHtml(c.exam_name)}` : ""}$${
+            c.exam_year ? ` • ${c.exam_year}` : ""
+          }`;
+          const fine = c.fine_print
+            ? `<p><strong>Fine print:</strong> ${escapeHtml(c.fine_print)}</p>`
+            : "";
+          const img = `<img class="thumb" src="${escapeHtml(c.newspaper_image_url)}" alt="Evidence" />`;
+          return `
+            <div class="card">
+              <h3>${title}</h3>
+              <p class="muted">${escapeHtml(meta.replace("$", ""))}</p>
+              <div class="row" style="margin-top: 10px; align-items: flex-start;">
+                ${img}
+                <div style="flex:1;">
+                  ${c.newspaper_name ? `<p class="muted">Source: ${escapeHtml(c.newspaper_name)}</p>` : ""}
+                  ${fine}
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join("\n");
+
+      const html = `
+        <h1>${escapeHtml(maskPersonName(conflict!.topper_name))} — ${escapeHtml(conflict!.rank_claimed)}</h1>
+        <p class="muted">Generated: ${new Date().toLocaleString()}</p>
+        <p class="muted">Severity: <strong>${escapeHtml(conflict!.severity)}</strong> • Status: <strong>${escapeHtml(
+        conflict!.status
+      )}</strong></p>
+        <div class="card">
+          <h2>Summary</h2>
+          <p>${escapeHtml(reportData?.summary || "")}</p>
+        </div>
+        <h2>Evidence</h2>
+        ${items || '<p class="muted">No evidence found for this conflict.</p>'}
+      `;
+
+      openPrintWindow({ title: `Conflict Dossier`, html });
+      return;
+    }
 
     const logo = institute.logo_url
       ? `<img class="logo" src="${escapeHtml(institute.logo_url)}" alt="${escapeHtml(institute.name)}" />`
@@ -153,7 +264,7 @@ export default function ReportGenerator() {
       .replace(/'/g, "&#039;");
   }
 
-  if (instituteLoading) {
+  if (isInstituteReport && instituteLoading) {
     return (
       <Layout>
         <div className="container py-8 max-w-3xl">
@@ -166,7 +277,20 @@ export default function ReportGenerator() {
     );
   }
 
-  if (!institute) {
+  if (isConflictReport && (conflictLoading || conflictClaimsLoading || conflictInstitutesLoading)) {
+    return (
+      <Layout>
+        <div className="container py-8 max-w-3xl">
+          <div className="animate-pulse space-y-8">
+            <div className="h-8 bg-muted rounded w-48" />
+            <div className="h-64 bg-muted rounded" />
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (isInstituteReport && !institute) {
     return (
       <Layout>
         <div className="container py-16 text-center">
@@ -179,6 +303,24 @@ export default function ReportGenerator() {
             <Link to="/store">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Store
+            </Link>
+          </Button>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (isConflictReport && !conflict) {
+    return (
+      <Layout>
+        <div className="container py-16 text-center">
+          <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Conflict Not Found</h2>
+          <p className="text-muted-foreground mb-6">Cannot generate report for this conflict.</p>
+          <Button asChild>
+            <Link to="/conflicts">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Conflicts
             </Link>
           </Button>
         </div>
