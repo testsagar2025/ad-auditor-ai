@@ -19,6 +19,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useInstitute, useInstituteClaims } from "@/hooks/useInstitute";
 import { cn } from "@/lib/utils";
+import { maskPersonName } from "@/lib/privacy";
+import { openPrintWindow } from "@/lib/print";
 
 export default function InstituteDetail() {
   const { id } = useParams();
@@ -68,6 +70,76 @@ export default function InstituteDetail() {
   const verifiedClaims = claims?.filter((c) => c.is_verified) || [];
   const claimsWithFinePrint = claims?.filter((c) => c.fine_print) || [];
 
+  const exportInstitutePdf = () => {
+    const safeName = institute.name;
+    const rows = (claims || [])
+      .map((c) => {
+        const statusBadges = [
+          c.has_conflict ? '<span class="badge badge-danger">Conflict</span>' : "",
+          c.is_verified ? '<span class="badge badge-ok">Verified</span>' : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return `
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items: flex-start;">
+              <div>
+                <h3>${escapeHtml(maskPersonName(c.topper_name))}</h3>
+                <p class="muted"><strong>${escapeHtml(c.rank_claimed)}</strong>${c.exam_name ? ` • ${escapeHtml(c.exam_name)}` : ""}${c.exam_year ? ` • ${c.exam_year}` : ""}</p>
+              </div>
+              <div>${statusBadges}</div>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+              <img class="thumb" src="${escapeHtml(c.newspaper_image_url)}" alt="Evidence" />
+              <div style="flex:1;">
+                ${c.newspaper_name ? `<p class="muted">Source: ${escapeHtml(c.newspaper_name)}</p>` : ""}
+                ${c.fine_print ? `<p><strong>Fine print:</strong> ${escapeHtml(c.fine_print)}</p>` : ""}
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("\n");
+
+    const logo = institute.logo_url
+      ? `<img class="logo" src="${escapeHtml(institute.logo_url)}" alt="${escapeHtml(safeName)}" />`
+      : "";
+
+    const html = `
+      <div class="row" style="justify-content: space-between;">
+        <div class="row">
+          ${logo}
+          <div>
+            <h1>${escapeHtml(safeName)} — Institute Dossier</h1>
+            <p class="muted">Generated on ${new Date().toLocaleString()}</p>
+          </div>
+        </div>
+        <div class="card" style="margin:0;">
+          <div class="grid grid-3">
+            <div><p class="muted">Total Claims</p><h2>${institute.total_claims}</h2></div>
+            <div><p class="muted">Conflicts</p><h2>${institute.conflicted_claims}</h2></div>
+            <div><p class="muted">Deception Score</p><h2>${institute.deception_score}/100</h2></div>
+          </div>
+        </div>
+      </div>
+      <div style="height: 10px;"></div>
+      <h2>Claims</h2>
+      ${rows || '<p class="muted">No claims found.</p>'}
+    `;
+
+    openPrintWindow({ title: `${safeName} Dossier`, html });
+  };
+
+  function escapeHtml(input: string) {
+    return input
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
   return (
     <Layout>
       <div className="container py-8">
@@ -112,12 +184,18 @@ export default function InstituteDetail() {
 
           <div className="flex flex-col items-center lg:items-end gap-4">
             <DeceptionScore score={institute.deception_score} size="lg" />
-            <Button variant="outline" asChild>
-              <Link to={`/report/institute/${institute.id}`}>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button variant="outline" asChild>
+                <Link to={`/report/institute/${institute.id}`}>
+                  <FileDown className="h-4 w-4 mr-2" />
+                  Generate CCPA Report
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={exportInstitutePdf}>
                 <FileDown className="h-4 w-4 mr-2" />
-                Generate CCPA Report
-              </Link>
-            </Button>
+                Export PDF
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -192,7 +270,12 @@ export default function InstituteDetail() {
             ) : (
               <div className="grid gap-4">
                 {claims?.map((claim) => (
-                  <ClaimCard key={claim.id} claim={claim} />
+                  <ClaimCard
+                    key={claim.id}
+                    claim={claim}
+                    instituteLogoUrl={institute.logo_url}
+                    instituteName={institute.name}
+                  />
                 ))}
               </div>
             )}
@@ -210,7 +293,12 @@ export default function InstituteDetail() {
             ) : (
               <div className="grid gap-4">
                 {conflictedClaims.map((claim) => (
-                  <ClaimCard key={claim.id} claim={claim} />
+                  <ClaimCard
+                    key={claim.id}
+                    claim={claim}
+                    instituteLogoUrl={institute.logo_url}
+                    instituteName={institute.name}
+                  />
                 ))}
               </div>
             )}
@@ -228,7 +316,12 @@ export default function InstituteDetail() {
             ) : (
               <div className="grid gap-4">
                 {verifiedClaims.map((claim) => (
-                  <ClaimCard key={claim.id} claim={claim} />
+                  <ClaimCard
+                    key={claim.id}
+                    claim={claim}
+                    instituteLogoUrl={institute.logo_url}
+                    instituteName={institute.name}
+                  />
                 ))}
               </div>
             )}
@@ -241,9 +334,11 @@ export default function InstituteDetail() {
 
 interface ClaimCardProps {
   claim: import("@/types/database").TopperClaim;
+  instituteLogoUrl?: string | null;
+  instituteName?: string;
 }
 
-function ClaimCard({ claim }: ClaimCardProps) {
+function ClaimCard({ claim, instituteLogoUrl, instituteName }: ClaimCardProps) {
   return (
     <div
       className={cn(
@@ -266,8 +361,17 @@ function ClaimCard({ claim }: ClaimCardProps) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h3 className="font-semibold text-lg flex items-center gap-2">
-                <Award className="h-4 w-4 text-primary" />
-                {claim.topper_name}
+                {instituteLogoUrl ? (
+                  <img
+                    src={instituteLogoUrl}
+                    alt={instituteName || "Institute"}
+                    className="h-6 w-6 rounded-md object-cover border border-border"
+                    loading="lazy"
+                  />
+                ) : (
+                  <Award className="h-4 w-4 text-primary" />
+                )}
+                {maskPersonName(claim.topper_name)}
               </h3>
               <p className="text-primary font-medium">{claim.rank_claimed}</p>
             </div>

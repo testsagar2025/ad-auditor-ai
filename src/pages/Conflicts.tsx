@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConflicts } from "@/hooks/useConflicts";
 import { cn } from "@/lib/utils";
+import { maskPersonName } from "@/lib/privacy";
 
 export default function Conflicts() {
   const { data: conflicts, isLoading } = useConflicts();
@@ -92,7 +93,7 @@ export default function Conflicts() {
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h3 className="font-semibold text-lg">
-                          {conflict.topper_name} - {conflict.rank_claimed}
+                          {maskPersonName(conflict.topper_name)} - {conflict.rank_claimed}
                         </h3>
                         <p className="text-sm text-muted-foreground">
                           {conflict.exam_name} {conflict.exam_year}
