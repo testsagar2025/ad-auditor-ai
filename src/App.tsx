@@ -2,12 +2,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import Store from "./pages/Store";
 import InstituteDetail from "./pages/InstituteDetail";
 import Scanner from "./pages/Scanner";
 import Conflicts from "./pages/Conflicts";
+import ConflictDetail from "./pages/ConflictDetail";
 import ReportGenerator from "./pages/ReportGenerator";
 import About from "./pages/About";
 import Terms from "./pages/Terms";
@@ -29,6 +30,8 @@ const App = () => (
           <Route path="/store/:id" element={<InstituteDetail />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/conflicts" element={<Conflicts />} />
+          <Route path="/conflicts/:id" element={<ConflictDetail />} />
+          <Route path="/conflict" element={<Navigate to="/conflicts" replace />} />
           <Route path="/report/:type/:id" element={<ReportGenerator />} />
           <Route path="/about" element={<About />} />
           <Route path="/terms" element={<Terms />} />

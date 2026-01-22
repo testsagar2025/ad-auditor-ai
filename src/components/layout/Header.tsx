@@ -18,7 +18,7 @@ export function Header() {
             to="/store"
             className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            The Store
+            Institutes
           </Link>
           <Link
             to="/scanner"

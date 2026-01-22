@@ -42,7 +42,7 @@ export default function Store() {
       <div className="container py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">The Store</h1>
+          <h1 className="text-3xl font-bold mb-2">Institutes</h1>
           <p className="text-muted-foreground">
             Browse the database of coaching institutes and their deception scores
           </p>

@@ -130,7 +130,7 @@ export default function Conflicts() {
                         <Link to={`/conflicts/${conflict.id}`}>View Details</Link>
                       </Button>
                       <Button variant="outline" size="sm" asChild>
-                        <Link to={`/report/${conflict.id}`}>
+                        <Link to={`/report/conflict/${conflict.id}`}>
                           <FileDown className="h-4 w-4 mr-1" />
                           Generate Report
                         </Link>
