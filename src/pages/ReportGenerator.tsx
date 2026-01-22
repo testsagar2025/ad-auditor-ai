@@ -15,6 +15,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useInstitute, useInstituteClaims } from "@/hooks/useInstitute";
 import { supabase } from "@/integrations/supabase/client";
+import { maskPersonName } from "@/lib/privacy";
+import { openPrintWindow } from "@/lib/print";
 
 export default function ReportGenerator() {
   const { type, id } = useParams();
@@ -22,6 +24,7 @@ export default function ReportGenerator() {
   const { toast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
   const [reportGenerated, setReportGenerated] = useState(false);
+  const [reportData, setReportData] = useState<any>(null);
 
   const isInstituteReport = type === "institute";
   const { data: institute, isLoading: instituteLoading } = useInstitute(
@@ -38,7 +41,7 @@ export default function ReportGenerator() {
 
     try {
       // Create report data
-      const reportData = {
+      const nextReportData = {
         institute_name: institute.name,
         institute_logo: institute.logo_url,
         generated_at: new Date().toISOString(),
@@ -59,11 +62,12 @@ export default function ReportGenerator() {
       // Save to database
       const { error } = await supabase.from("ccpa_reports").insert({
         institute_id: institute.id,
-        report_data: reportData,
+        report_data: nextReportData,
       });
 
       if (error) throw error;
 
+      setReportData(nextReportData);
       setReportGenerated(true);
       toast({
         title: "Report Generated",
@@ -80,6 +84,74 @@ export default function ReportGenerator() {
       setIsGenerating(false);
     }
   };
+
+  const exportPdf = () => {
+    if (!institute) return;
+
+    const logo = institute.logo_url
+      ? `<img class="logo" src="${escapeHtml(institute.logo_url)}" alt="${escapeHtml(institute.name)}" />`
+      : "";
+
+    const items = conflictedClaims
+      .map((c) => {
+        const title = `${escapeHtml(maskPersonName(c.topper_name))} — ${escapeHtml(c.rank_claimed)}`;
+        const meta = `${c.exam_name ? escapeHtml(c.exam_name) : ""}${c.exam_year ? ` • ${c.exam_year}` : ""}`;
+        const fine = c.fine_print ? `<p><strong>Fine print:</strong> ${escapeHtml(c.fine_print)}</p>` : "";
+        const img = `<img class="thumb" src="${escapeHtml(c.newspaper_image_url)}" alt="Evidence" />`;
+        return `
+          <div class="card">
+            <h3>${title}</h3>
+            <p class="muted">${meta}</p>
+            <div class="row" style="margin-top: 10px; align-items: flex-start;">
+              ${img}
+              <div style="flex:1;">
+                ${c.newspaper_name ? `<p class="muted">Source: ${escapeHtml(c.newspaper_name)}</p>` : ""}
+                ${fine}
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("\n");
+
+    const html = `
+      <div class="row" style="justify-content: space-between;">
+        <div class="row">
+          ${logo}
+          <div>
+            <h1>CCPA Complaint Dossier</h1>
+            <p class="muted">Institute: <strong>${escapeHtml(institute.name)}</strong></p>
+            <p class="muted">Generated: ${new Date().toLocaleString()}</p>
+          </div>
+        </div>
+        <div class="card" style="margin:0;">
+          <div class="grid grid-3">
+            <div><p class="muted">Total Claims</p><h2>${institute.total_claims}</h2></div>
+            <div><p class="muted">Conflicts</p><h2>${conflictedClaims.length}</h2></div>
+            <div><p class="muted">Score</p><h2>${institute.deception_score}/100</h2></div>
+          </div>
+        </div>
+      </div>
+      <div style="height: 10px;"></div>
+      <div class="card">
+        <h2>Summary</h2>
+        <p>${escapeHtml(reportData?.summary || "")}</p>
+      </div>
+      <h2>Evidence & Conflicts</h2>
+      ${items || '<p class="muted">No conflicts detected for this institute.</p>'}
+    `;
+
+    openPrintWindow({ title: `${institute.name} CCPA Dossier`, html });
+  };
+
+  function escapeHtml(input: string) {
+    return input
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
 
   if (instituteLoading) {
     return (
@@ -144,6 +216,10 @@ export default function ReportGenerator() {
               <div className="flex gap-3 justify-center">
                 <Button variant="outline" onClick={() => navigate(`/store/${institute.id}`)}>
                   View Institute
+                </Button>
+                <Button variant="outline" onClick={exportPdf}>
+                  <FileDown className="h-4 w-4 mr-2" />
+                  Export PDF
                 </Button>
                 <Button onClick={() => navigate("/conflicts")}>
                   View All Conflicts
@@ -216,7 +292,7 @@ export default function ReportGenerator() {
                         className="p-3 rounded-lg bg-destructive/5 border border-destructive/10"
                       >
                         <p className="font-medium text-sm">
-                          {claim.topper_name} - {claim.rank_claimed}
+                          {maskPersonName(claim.topper_name)} - {claim.rank_claimed}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {claim.exam_name} {claim.exam_year}

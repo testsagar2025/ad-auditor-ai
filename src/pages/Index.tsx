@@ -21,6 +21,7 @@ import { useInstitutes } from "@/hooks/useInstitutes";
 import { useConflicts } from "@/hooks/useConflicts";
 import { useClaims } from "@/hooks/useClaims";
 import { cn } from "@/lib/utils";
+import { maskPersonName } from "@/lib/privacy";
 
 export default function Index() {
   const { data: institutes } = useInstitutes();
@@ -204,7 +205,7 @@ export default function Index() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h4 className="font-semibold truncate">{claim.topper_name}</h4>
+                          <h4 className="font-semibold truncate">{maskPersonName(claim.topper_name)}</h4>
                           <p className="text-sm text-primary">{claim.rank_claimed}</p>
                         </div>
                         {claim.has_conflict && (
