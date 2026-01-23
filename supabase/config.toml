@@ -1,1 +1,13 @@
 project_id = "xvqybpvekaswsktnumhd"
+
+[functions.extract-ad-data]
+verify_jwt = false
+
+[functions.detect-conflicts]
+verify_jwt = false
+
+[functions.normalize-institute]
+verify_jwt = false
+
+[functions.track-analytics]
+verify_jwt = false

@@ -10,6 +10,7 @@ import Scanner from "./pages/Scanner";
 import Conflicts from "./pages/Conflicts";
 import ConflictDetail from "./pages/ConflictDetail";
 import ReportGenerator from "./pages/ReportGenerator";
+import Admin from "./pages/Admin";
 import About from "./pages/About";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
@@ -33,6 +34,7 @@ const App = () => (
           <Route path="/conflicts/:id" element={<ConflictDetail />} />
           <Route path="/conflict" element={<Navigate to="/conflicts" replace />} />
           <Route path="/report/:type/:id" element={<ReportGenerator />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="/about" element={<About />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />

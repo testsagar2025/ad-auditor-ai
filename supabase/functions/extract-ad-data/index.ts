@@ -31,24 +31,32 @@ serve(async (req) => {
             role: "system",
             content: `You are an expert at extracting information from Indian coaching institute newspaper advertisements. These ads often feature MULTIPLE students. Extract ALL students shown in the ad and return ONLY valid JSON in this format:
 {
-  "institute_name": "Name of the coaching institute",
+  "institute_name": "Name of the coaching institute (clean, standardized name)",
+  "course_category": "JEE or NEET (based on the exam type mentioned - IIT-JEE/JEE Advanced/JEE Main = JEE, NEET-UG/AIIMS = NEET)",
   "students": [
     {
       "topper_name": "Full name of the student",
       "rank_claimed": "The rank claimed (e.g., AIR 5, Rank 1, 100%ile)",
-      "exam_name": "Name of the exam (e.g., IIT-JEE, NEET, UPSC)",
+      "exam_name": "Name of the exam (e.g., IIT-JEE Advanced, JEE Main, NEET-UG)",
       "exam_year": 2024,
-      "fine_print": "Any disclaimers like 'Mock Interview', 'Crash Course', 'Distance Learning', etc."
+      "fine_print": "Any disclaimers like 'Mock Interview', 'Crash Course', 'Distance Learning', 'Classroom + Online', 'Result improvement batch', etc."
     }
   ],
   "confidence": 0.9
 }
-Extract EVERY student visible in the advertisement. If you cannot determine a field, use null. Be especially careful to find any fine print or disclaimers that apply to each student.`
+
+IMPORTANT RULES:
+1. Extract EVERY student visible in the advertisement
+2. Pay special attention to FINE PRINT - look for small text, asterisks (*), disclaimers
+3. Common fine print patterns: "Classroom Program", "Distance Learning", "Test Series", "Crash Course", "Result Improvement", "Mock Interview"
+4. If you cannot determine a field, use null
+5. Normalize institute names (e.g., "ALLEN Career Institute Kota" → "ALLEN")
+6. Determine course_category based on exam type (JEE = engineering, NEET = medical)`
           },
           {
             role: "user",
             content: [
-              { type: "text", text: "Extract ALL topper claims from this coaching advertisement. There may be multiple students shown:" },
+              { type: "text", text: "Extract ALL topper claims from this coaching advertisement. Pay special attention to any fine print or disclaimers. Determine if this is JEE or NEET based on the exam mentioned:" },
               { type: "image_url", image_url: { url: image } }
             ]
           }
@@ -71,6 +79,8 @@ Extract EVERY student visible in the advertisement. If you cannot determine a fi
     // Parse JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     const extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+
+    console.log("Extracted data:", extracted);
 
     return new Response(JSON.stringify({ extracted }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -9,7 +9,9 @@ import {
   FileText,
   Plus,
   Trash2,
-  Users
+  Users,
+  Lock,
+  GraduationCap
 } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
@@ -17,8 +19,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { trackSubmission } from "@/hooks/useAnalytics";
 import type { ExtractedAdData, ExtractedStudent } from "@/types/database";
 
 type ScanStep = "upload" | "processing" | "review" | "submitted";
@@ -30,6 +34,7 @@ interface StudentFormData {
   exam_name: string;
   exam_year: number;
   fine_print: string;
+  course_category: string;
 }
 
 const createEmptyStudent = (): StudentFormData => ({
@@ -39,6 +44,7 @@ const createEmptyStudent = (): StudentFormData => ({
   exam_name: "",
   exam_year: new Date().getFullYear(),
   fine_print: "",
+  course_category: "JEE",
 });
 
 export default function Scanner() {
@@ -53,7 +59,10 @@ export default function Scanner() {
   // Form data
   const [instituteName, setInstituteName] = useState("");
   const [newspaperName, setNewspaperName] = useState("");
+  const [location, setLocation] = useState("");
+  const [courseCategory, setCourseCategory] = useState("JEE");
   const [students, setStudents] = useState<StudentFormData[]>([createEmptyStudent()]);
+  const [isExtracted, setIsExtracted] = useState(false);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -99,9 +108,11 @@ export default function Scanner() {
       if (error) throw error;
 
       if (data?.extracted) {
-        const extracted = data.extracted as ExtractedAdData;
+        const extracted = data.extracted as ExtractedAdData & { course_category?: string };
         setExtractedData(extracted);
         setInstituteName(extracted.institute_name || "");
+        setCourseCategory(extracted.course_category || "JEE");
+        setIsExtracted(true);
         
         if (extracted.students && extracted.students.length > 0) {
           setStudents(extracted.students.map((s: ExtractedStudent) => ({
@@ -111,6 +122,7 @@ export default function Scanner() {
             exam_name: s.exam_name || "",
             exam_year: s.exam_year || new Date().getFullYear(),
             fine_print: s.fine_print || "",
+            course_category: extracted.course_category || "JEE",
           })));
         }
       }
@@ -123,6 +135,7 @@ export default function Scanner() {
         description: "Could not extract data. Please enter details manually.",
         variant: "destructive",
       });
+      setIsExtracted(false);
       setStep("review");
     } finally {
       setIsProcessing(false);
@@ -130,16 +143,19 @@ export default function Scanner() {
   };
 
   const addStudent = () => {
-    setStudents([...students, createEmptyStudent()]);
+    if (!isExtracted) {
+      setStudents([...students, createEmptyStudent()]);
+    }
   };
 
   const removeStudent = (id: string) => {
-    if (students.length > 1) {
+    if (students.length > 1 && !isExtracted) {
       setStudents(students.filter(s => s.id !== id));
     }
   };
 
   const updateStudent = (id: string, field: keyof StudentFormData, value: string | number) => {
+    // Only allow editing if not extracted (for non-student fields handled separately)
     setStudents(students.map(s => 
       s.id === id ? { ...s, [field]: value } : s
     ));
@@ -183,26 +199,48 @@ export default function Scanner() {
         .from("newspaper-ads")
         .getPublicUrl(fileName);
 
-      // Check if institute exists or create new
+      // Use AI to normalize institute name
+      const { data: normalizeResult } = await supabase.functions.invoke("normalize-institute", {
+        body: { institute_name: instituteName },
+      });
+
       let instituteId: string | null = null;
 
-      const { data: existing } = await supabase
-        .from("coaching_institutes")
-        .select("id, total_claims")
-        .ilike("name", instituteName)
-        .maybeSingle();
-
-      if (existing) {
-        instituteId = existing.id;
+      if (normalizeResult?.matched && normalizeResult.matched_id) {
+        // Use existing institute
+        instituteId = normalizeResult.matched_id;
+        
         // Update total claims count
+        const { data: existing } = await supabase
+          .from("coaching_institutes")
+          .select("total_claims")
+          .eq("id", instituteId)
+          .single();
+
         await supabase
           .from("coaching_institutes")
-          .update({ total_claims: (existing.total_claims || 0) + validStudents.length })
-          .eq("id", existing.id);
+          .update({ 
+            total_claims: (existing?.total_claims || 0) + validStudents.length,
+            course_category: courseCategory,
+          })
+          .eq("id", instituteId);
+
+        toast({
+          title: "Institute matched",
+          description: `Matched to existing: ${normalizeResult.matched_name}`,
+        });
       } else {
+        // Create new institute with normalized name
+        const normalizedName = normalizeResult?.normalized_name || instituteName;
+        
         const { data: newInstitute, error: instituteError } = await supabase
           .from("coaching_institutes")
-          .insert({ name: instituteName, total_claims: validStudents.length })
+          .insert({ 
+            name: normalizedName, 
+            total_claims: validStudents.length,
+            location: location || null,
+            course_category: courseCategory,
+          })
           .select()
           .single();
 
@@ -222,6 +260,7 @@ export default function Scanner() {
           newspaper_name: newspaperName || null,
           newspaper_image_url: urlData.publicUrl,
           extracted_text: extractedData ? JSON.stringify(extractedData) : null,
+          course_category: courseCategory,
         });
 
         if (claimError) throw claimError;
@@ -235,6 +274,13 @@ export default function Scanner() {
           },
         });
       }
+
+      // Track submission
+      await trackSubmission({ 
+        institute_name: instituteName,
+        students_count: validStudents.length,
+        course_category: courseCategory,
+      });
 
       setStep("submitted");
       toast({
@@ -260,7 +306,10 @@ export default function Scanner() {
     setExtractedData(null);
     setInstituteName("");
     setNewspaperName("");
+    setLocation("");
+    setCourseCategory("JEE");
     setStudents([createEmptyStudent()]);
+    setIsExtracted(false);
   };
 
   return (
@@ -397,7 +446,9 @@ export default function Scanner() {
               <CardHeader>
                 <CardTitle>Advertisement Details</CardTitle>
                 <CardDescription>
-                  Information about the coaching institute and source
+                  {isExtracted 
+                    ? "AI extracted data. You can edit location and newspaper name only."
+                    : "Enter the details manually"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -410,12 +461,17 @@ export default function Scanner() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="institute">Institute Name *</Label>
+                    <Label htmlFor="institute" className="flex items-center gap-2">
+                      Institute Name *
+                      {isExtracted && <Lock className="h-3 w-3 text-muted-foreground" />}
+                    </Label>
                     <Input
                       id="institute"
                       value={instituteName}
-                      onChange={(e) => setInstituteName(e.target.value)}
+                      onChange={(e) => !isExtracted && setInstituteName(e.target.value)}
                       placeholder="e.g., ABC Coaching"
+                      disabled={isExtracted}
+                      className={isExtracted ? "bg-muted" : ""}
                     />
                   </div>
                   <div>
@@ -426,6 +482,35 @@ export default function Scanner() {
                       onChange={(e) => setNewspaperName(e.target.value)}
                       placeholder="e.g., Times of India"
                     />
+                  </div>
+                  <div>
+                    <Label htmlFor="location">Location</Label>
+                    <Input
+                      id="location"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      placeholder="e.g., Kota, Rajasthan"
+                    />
+                  </div>
+                  <div>
+                    <Label className="flex items-center gap-2">
+                      <GraduationCap className="h-4 w-4" />
+                      Course Category
+                    </Label>
+                    <div className="flex gap-2 mt-1">
+                      {["JEE", "NEET"].map((cat) => (
+                        <Button
+                          key={cat}
+                          type="button"
+                          variant={courseCategory === cat ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCourseCategory(cat)}
+                          disabled={isExtracted}
+                        >
+                          {cat}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -439,26 +524,47 @@ export default function Scanner() {
                     <CardTitle className="flex items-center gap-2">
                       <Users className="h-5 w-5" />
                       Students ({students.length})
+                      {isExtracted && (
+                        <Badge variant="secondary" className="ml-2">
+                          <Lock className="h-3 w-3 mr-1" />
+                          AI Extracted
+                        </Badge>
+                      )}
                     </CardTitle>
                     <CardDescription>
-                      All toppers mentioned in the advertisement
+                      {isExtracted 
+                        ? "Student details are locked. Only admin can edit."
+                        : "All toppers mentioned in the advertisement"}
                     </CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={addStudent}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Student
-                  </Button>
+                  {!isExtracted && (
+                    <Button variant="outline" size="sm" onClick={addStudent}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Student
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 {students.map((student, index) => (
                   <div
                     key={student.id}
-                    className="p-4 rounded-lg border border-border bg-card/50 space-y-4"
+                    className={`p-4 rounded-lg border space-y-4 ${
+                      isExtracted 
+                        ? "border-primary/20 bg-primary/5" 
+                        : "border-border bg-card/50"
+                    }`}
                   >
                     <div className="flex items-center justify-between">
-                      <h4 className="font-medium">Student #{index + 1}</h4>
-                      {students.length > 1 && (
+                      <h4 className="font-medium flex items-center gap-2">
+                        Student #{index + 1}
+                        {student.fine_print && (
+                          <Badge variant="outline" className="text-warning border-warning/30">
+                            ⚠️ Fine Print
+                          </Badge>
+                        )}
+                      </h4>
+                      {students.length > 1 && !isExtracted && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -472,67 +578,78 @@ export default function Scanner() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <Label>Topper Name *</Label>
+                        <Label className="flex items-center gap-2">
+                          Topper Name *
+                          {isExtracted && <Lock className="h-3 w-3 text-muted-foreground" />}
+                        </Label>
                         <Input
                           value={student.topper_name}
-                          onChange={(e) => updateStudent(student.id, "topper_name", e.target.value)}
+                          onChange={(e) => !isExtracted && updateStudent(student.id, "topper_name", e.target.value)}
                           placeholder="e.g., Rahul Sharma"
+                          disabled={isExtracted}
+                          className={isExtracted ? "bg-muted" : ""}
                         />
                       </div>
                       <div>
-                        <Label>Rank Claimed *</Label>
+                        <Label className="flex items-center gap-2">
+                          Rank Claimed *
+                          {isExtracted && <Lock className="h-3 w-3 text-muted-foreground" />}
+                        </Label>
                         <Input
                           value={student.rank_claimed}
-                          onChange={(e) => updateStudent(student.id, "rank_claimed", e.target.value)}
+                          onChange={(e) => !isExtracted && updateStudent(student.id, "rank_claimed", e.target.value)}
                           placeholder="e.g., AIR 5, 100%ile"
+                          disabled={isExtracted}
+                          className={isExtracted ? "bg-muted" : ""}
                         />
                       </div>
                       <div>
-                        <Label>Exam Name</Label>
+                        <Label className="flex items-center gap-2">
+                          Exam Name
+                          {isExtracted && <Lock className="h-3 w-3 text-muted-foreground" />}
+                        </Label>
                         <Input
                           value={student.exam_name}
-                          onChange={(e) => updateStudent(student.id, "exam_name", e.target.value)}
+                          onChange={(e) => !isExtracted && updateStudent(student.id, "exam_name", e.target.value)}
                           placeholder="e.g., JEE Advanced"
+                          disabled={isExtracted}
+                          className={isExtracted ? "bg-muted" : ""}
                         />
                       </div>
                       <div>
-                        <Label>Exam Year</Label>
+                        <Label className="flex items-center gap-2">
+                          Exam Year
+                          {isExtracted && <Lock className="h-3 w-3 text-muted-foreground" />}
+                        </Label>
                         <Input
                           type="number"
                           value={student.exam_year}
-                          onChange={(e) => updateStudent(student.id, "exam_year", parseInt(e.target.value))}
+                          onChange={(e) => !isExtracted && updateStudent(student.id, "exam_year", parseInt(e.target.value))}
+                          placeholder="2024"
+                          disabled={isExtracted}
+                          className={isExtracted ? "bg-muted" : ""}
                         />
                       </div>
                     </div>
 
-                    <div>
-                      <Label>Fine Print / Disclaimers</Label>
-                      <Textarea
-                        value={student.fine_print}
-                        onChange={(e) => updateStudent(student.id, "fine_print", e.target.value)}
-                        placeholder="e.g., Mock Interview, Distance Learning, Crash Course..."
-                        rows={2}
-                      />
-                    </div>
+                    {/* Fine Print Display */}
+                    {student.fine_print && (
+                      <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
+                        <p className="text-xs text-warning font-medium mb-1">⚠️ Fine Print Detected:</p>
+                        <p className="text-sm text-muted-foreground">{student.fine_print}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </CardContent>
             </Card>
 
             {/* Actions */}
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setStep("upload")}
-                className="flex-1"
-              >
+            <div className="flex gap-4">
+              <Button variant="outline" onClick={() => setStep("upload")}>
                 Back
               </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={isProcessing}
-                className="flex-1"
-              >
+              <Button className="flex-1" onClick={handleSubmit} disabled={isProcessing}>
                 {isProcessing ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -550,19 +667,16 @@ export default function Scanner() {
         )}
 
         {step === "submitted" && (
-          <Card>
+          <Card className="border-success/30">
             <CardContent className="py-16 text-center">
-              <div className="h-16 w-16 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="h-8 w-8 text-success" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">Submission Recorded!</h3>
+              <CheckCircle className="h-16 w-16 mx-auto text-success mb-4" />
+              <h3 className="text-2xl font-bold mb-2">Submission Successful!</h3>
               <p className="text-muted-foreground mb-6">
-                Your anonymous submission is now part of the database. Conflicts will be
-                automatically detected.
+                Your claim(s) have been recorded. Our system will check for conflicts.
               </p>
-              <div className="flex gap-3 justify-center">
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <Button variant="outline" onClick={() => navigate("/store")}>
-                  View The Store
+                  View Institutes
                 </Button>
                 <Button onClick={resetForm}>
                   Upload Another
@@ -574,7 +688,7 @@ export default function Scanner() {
 
         {/* Privacy Notice */}
         <p className="text-xs text-muted-foreground text-center mt-8">
-          🔒 Your submission is 100% anonymous. We do not track users or store any identifying information.
+          All submissions are anonymous. We do not track or store any personal information.
         </p>
       </div>
     </Layout>
