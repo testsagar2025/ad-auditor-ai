@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Search, Filter, Building2, AlertTriangle, TrendingDown } from "lucide-react";
+import { Search, Filter, Building2, AlertTriangle, TrendingDown, GraduationCap } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { InstituteCard } from "@/components/store/InstituteCard";
 import { useInstitutes } from "@/hooks/useInstitutes";
 import {
@@ -13,15 +14,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+type CourseFilter = "all" | "JEE" | "NEET" | "BOTH";
+
 export default function Store() {
   const { data: institutes, isLoading } = useInstitutes();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("deception");
+  const [courseFilter, setCourseFilter] = useState<CourseFilter>("all");
 
   const filteredInstitutes = institutes
-    ?.filter((institute) =>
-      institute.name.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    ?.filter((institute) => {
+      const matchesSearch = institute.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const instituteCategory = (institute as any).course_category || "JEE";
+      const matchesCourse = 
+        courseFilter === "all" || 
+        instituteCategory === courseFilter || 
+        instituteCategory === "BOTH";
+      return matchesSearch && matchesCourse;
+    })
     .sort((a, b) => {
       switch (sortBy) {
         case "deception":
@@ -42,10 +52,26 @@ export default function Store() {
       <div className="container py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Institutes</h1>
+          <h1 className="text-3xl font-bold mb-2">Institutes Database</h1>
           <p className="text-muted-foreground">
             Browse the database of coaching institutes and their deception scores
           </p>
+        </div>
+
+        {/* Course Filter Pills */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {(["all", "JEE", "NEET"] as const).map((course) => (
+            <Button
+              key={course}
+              variant={courseFilter === course ? "default" : "outline"}
+              size="sm"
+              onClick={() => setCourseFilter(course)}
+              className="gap-2"
+            >
+              <GraduationCap className="h-4 w-4" />
+              {course === "all" ? "All Courses" : course}
+            </Button>
+          ))}
         </div>
 
         {/* Filters */}

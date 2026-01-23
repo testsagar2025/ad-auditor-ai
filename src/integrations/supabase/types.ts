@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      analytics: {
+        Row: {
+          created_at: string
+          event_data: Json | null
+          event_type: string
+          id: string
+          page_path: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_data?: Json | null
+          event_type: string
+          id?: string
+          page_path?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_data?: Json | null
+          event_type?: string
+          id?: string
+          page_path?: string | null
+        }
+        Relationships: []
+      }
       ccpa_reports: {
         Row: {
           conflict_id: string | null
@@ -59,6 +83,7 @@ export type Database = {
       coaching_institutes: {
         Row: {
           conflicted_claims: number
+          course_category: string | null
           created_at: string
           deception_score: number
           description: string | null
@@ -72,6 +97,7 @@ export type Database = {
         }
         Insert: {
           conflicted_claims?: number
+          course_category?: string | null
           created_at?: string
           deception_score?: number
           description?: string | null
@@ -85,6 +111,7 @@ export type Database = {
         }
         Update: {
           conflicted_claims?: number
+          course_category?: string | null
           created_at?: string
           deception_score?: number
           description?: string | null
@@ -143,6 +170,7 @@ export type Database = {
       topper_claims: {
         Row: {
           ad_date: string | null
+          course_category: string | null
           created_at: string
           exam_name: string | null
           exam_year: number | null
@@ -159,6 +187,7 @@ export type Database = {
         }
         Insert: {
           ad_date?: string | null
+          course_category?: string | null
           created_at?: string
           exam_name?: string | null
           exam_year?: number | null
@@ -175,6 +204,7 @@ export type Database = {
         }
         Update: {
           ad_date?: string | null
+          course_category?: string | null
           created_at?: string
           exam_name?: string | null
           exam_year?: number | null
