@@ -10,17 +10,19 @@ import {
   ExternalLink,
   Award,
   FileDown,
+  Users,
 } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DeceptionScore } from "@/components/ui/deception-score";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useInstitute, useInstituteClaims } from "@/hooks/useInstitute";
 import { cn } from "@/lib/utils";
 import { maskPersonName } from "@/lib/privacy";
-import { openPrintWindow } from "@/lib/print";
+import { openPrintWindow, escapeHtml } from "@/lib/print";
+import { StudentsTable } from "@/components/institute/StudentsTable";
 
 export default function InstituteDetail() {
   const { id } = useParams();
@@ -70,6 +72,9 @@ export default function InstituteDetail() {
   const verifiedClaims = claims?.filter((c) => c.is_verified) || [];
   const claimsWithFinePrint = claims?.filter((c) => c.fine_print) || [];
 
+  // Get unique students count
+  const uniqueStudents = new Set(claims?.map((c) => c.topper_name.toLowerCase().trim())).size;
+
   const exportInstitutePdf = () => {
     const safeName = institute.name;
     const rows = (claims || [])
@@ -102,43 +107,30 @@ export default function InstituteDetail() {
       })
       .join("\n");
 
-    const logo = institute.logo_url
-      ? `<img class="logo" src="${escapeHtml(institute.logo_url)}" alt="${escapeHtml(safeName)}" />`
-      : "";
-
     const html = `
-      <div class="row" style="justify-content: space-between;">
-        <div class="row">
-          ${logo}
-          <div>
-            <h1>${escapeHtml(safeName)} — Institute Dossier</h1>
-            <p class="muted">Generated on ${new Date().toLocaleString()}</p>
-          </div>
-        </div>
-        <div class="card" style="margin:0;">
-          <div class="grid grid-3">
-            <div><p class="muted">Total Claims</p><h2>${institute.total_claims}</h2></div>
-            <div><p class="muted">Conflicts</p><h2>${institute.conflicted_claims}</h2></div>
-            <div><p class="muted">Deception Score</p><h2>${institute.deception_score}/100</h2></div>
-          </div>
-        </div>
+      <div class="section">
+        <h2 class="section-title">Claims Overview</h2>
+        ${rows || '<p class="muted">No claims found.</p>'}
       </div>
-      <div style="height: 10px;"></div>
-      <h2>Claims</h2>
-      ${rows || '<p class="muted">No claims found.</p>'}
     `;
 
-    openPrintWindow({ title: `${safeName} Dossier`, html });
+    openPrintWindow({ 
+      title: `${safeName} Dossier`, 
+      html,
+      showWatermark: true,
+      coverPage: {
+        title: `${safeName}`,
+        subtitle: "Institute Dossier",
+        logo: institute.logo_url || undefined,
+        generatedAt: new Date().toLocaleString(),
+        stats: [
+          { label: "Total Claims", value: institute.total_claims },
+          { label: "Conflicts", value: institute.conflicted_claims },
+          { label: "Deception Score", value: `${institute.deception_score}/100` },
+        ],
+      },
+    });
   };
-
-  function escapeHtml(input: string) {
-    return input
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
 
   return (
     <Layout>
@@ -235,9 +227,13 @@ export default function InstituteDetail() {
 
         {/* Claims Tabs */}
         <Tabs defaultValue="all" className="space-y-6">
-          <TabsList>
+          <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="all">
               All Claims ({claims?.length || 0})
+            </TabsTrigger>
+            <TabsTrigger value="students" className="flex items-center gap-1">
+              <Users className="h-3 w-3" />
+              Students ({uniqueStudents})
             </TabsTrigger>
             <TabsTrigger value="conflicts">
               Conflicts ({conflictedClaims.length})
@@ -279,6 +275,10 @@ export default function InstituteDetail() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="students" className="space-y-4">
+            <StudentsTable claims={claims || []} />
           </TabsContent>
 
           <TabsContent value="conflicts" className="space-y-4">

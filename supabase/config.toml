@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.track-analytics]
 verify_jwt = false
+
+[functions.send-conflict-alert]
+verify_jwt = false

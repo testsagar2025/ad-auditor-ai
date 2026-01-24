@@ -77,6 +77,44 @@ serve(async (req) => {
       }
     }
 
+    // Send admin email alert if conflict detected
+    if (instituteIds.length > 1) {
+      try {
+        // Fetch institute names for the alert
+        const { data: institutes } = await supabase
+          .from("coaching_institutes")
+          .select("name")
+          .in("id", instituteIds);
+
+        const instituteNames = institutes?.map(i => i.name) || [];
+
+        // Call the send-conflict-alert function
+        const alertResponse = await fetch(
+          `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-conflict-alert`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            },
+            body: JSON.stringify({
+              conflict_id: claims?.[0]?.id,
+              topper_name,
+              rank_claimed,
+              institute_names: instituteNames,
+              severity: instituteIds.length > 3 ? "critical" : instituteIds.length > 2 ? "high" : "medium",
+            }),
+          }
+        );
+
+        const alertResult = await alertResponse.json();
+        console.log("Conflict alert result:", alertResult);
+      } catch (alertError) {
+        console.error("Failed to send conflict alert:", alertError);
+        // Don't fail the main function if alert fails
+      }
+    }
+
     return new Response(JSON.stringify({ 
       conflicts_found: instituteIds.length > 1,
       institute_count: instituteIds.length 
