@@ -22,6 +22,7 @@ import { useConflicts } from "@/hooks/useConflicts";
 import { useClaims } from "@/hooks/useClaims";
 import { cn } from "@/lib/utils";
 import { maskPersonName } from "@/lib/privacy";
+import { RealtimeConflicts } from "@/components/dashboard/RealtimeConflicts";
 
 export default function Index() {
   const { data: institutes } = useInstitutes();
@@ -227,59 +228,65 @@ export default function Index() {
         </section>
       )}
 
-      {/* Active Conflicts */}
-      {activeConflicts.length > 0 && (
-        <section className="py-16">
-          <div className="container">
-            <div className="flex items-center justify-between mb-8">
-              <div>
+      {/* Live Conflict Feed */}
+      <section className="py-16">
+        <div className="container">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <div className="mb-6">
                 <h2 className="text-2xl font-bold mb-2">Active Conflicts</h2>
                 <p className="text-muted-foreground">Cases where multiple institutes claim the same topper</p>
               </div>
-              <Button variant="outline" asChild>
-                <Link to="/conflicts">
-                  View All Conflicts
-                  <ArrowRight className="h-4 w-4 ml-2" />
-                </Link>
-              </Button>
-            </div>
-
-            <div className="space-y-4">
-              {activeConflicts.map((conflict) => (
-                <div
-                  key={conflict.id}
-                  className={cn(
-                    "audit-card",
-                    conflict.severity === "critical" && "border-destructive/50 glow-destructive"
-                  )}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="h-12 w-12 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                      <AlertTriangle className="h-6 w-6 text-destructive" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-semibold">{conflict.topper_name} - {conflict.rank_claimed}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {conflict.exam_name} {conflict.exam_year} • {conflict.institute_ids?.length || 0} institutes claiming
-                      </p>
-                    </div>
-                    <Badge
+              
+              {activeConflicts.length > 0 ? (
+                <div className="space-y-4">
+                  {activeConflicts.map((conflict) => (
+                    <Link
+                      key={conflict.id}
+                      to={`/conflicts/${conflict.id}`}
                       className={cn(
-                        conflict.severity === "critical" && "bg-destructive",
-                        conflict.severity === "high" && "bg-destructive/80",
-                        conflict.severity === "medium" && "bg-warning",
-                        conflict.severity === "low" && "bg-muted"
+                        "audit-card block hover:border-primary/50 transition-colors",
+                        conflict.severity === "critical" && "border-destructive/50 glow-destructive"
                       )}
                     >
-                      {conflict.severity}
-                    </Badge>
-                  </div>
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                          <AlertTriangle className="h-6 w-6 text-destructive" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold">{maskPersonName(conflict.topper_name)} - {conflict.rank_claimed}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {conflict.exam_name} {conflict.exam_year} • {conflict.institute_ids?.length || 0} institutes claiming
+                          </p>
+                        </div>
+                        <Badge
+                          className={cn(
+                            conflict.severity === "critical" && "bg-destructive",
+                            conflict.severity === "high" && "bg-destructive/80",
+                            conflict.severity === "medium" && "bg-warning",
+                            conflict.severity === "low" && "bg-muted"
+                          )}
+                        >
+                          {conflict.severity}
+                        </Badge>
+                      </div>
+                    </Link>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <div className="audit-card text-center py-12">
+                  <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No active conflicts detected</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="lg:col-span-1">
+              <RealtimeConflicts />
             </div>
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {/* How It Works */}
       <section className="py-16 bg-card border-y border-border">
