@@ -5,9 +5,7 @@ import {
   Lock,
   Eye,
   Upload,
-  Users,
   AlertTriangle,
-  FileText,
   TrendingUp,
   Building2,
   Search,
@@ -32,6 +30,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { CoachingInstitute } from "@/types/database";
+import type { Tables } from "@/integrations/supabase/types";
+import { ConflictResolution } from "@/components/admin/ConflictResolution";
 
 const ADMIN_PASSWORD = "Admin@2026";
 
@@ -42,6 +42,8 @@ interface AnalyticsData {
   daily_views: { date: string; count: number }[];
 }
 
+type ConflictRow = Tables<"conflicts">;
+
 export default function Admin() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -50,6 +52,7 @@ export default function Admin() {
   const [isLoading, setIsLoading] = useState(true);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [institutes, setInstitutes] = useState<CoachingInstitute[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictRow[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedInstitute, setSelectedInstitute] = useState<CoachingInstitute | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -124,6 +127,14 @@ export default function Admin() {
         .order("name");
 
       setInstitutes((institutesData as CoachingInstitute[]) || []);
+
+      // Load conflicts
+      const { data: conflictsData } = await supabase
+        .from("conflicts")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      setConflicts(conflictsData || []);
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
@@ -345,6 +356,10 @@ export default function Admin() {
               <Building2 className="h-4 w-4 mr-2" />
               Institutes
             </TabsTrigger>
+            <TabsTrigger value="conflicts">
+              <AlertTriangle className="h-4 w-4 mr-2" />
+              Conflicts
+            </TabsTrigger>
             <TabsTrigger value="analytics">
               <TrendingUp className="h-4 w-4 mr-2" />
               Analytics
@@ -530,6 +545,10 @@ export default function Admin() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="conflicts" className="space-y-6">
+            <ConflictResolution conflicts={conflicts} onUpdate={loadData} />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
