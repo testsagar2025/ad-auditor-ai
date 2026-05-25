@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/((?!_next|static|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
